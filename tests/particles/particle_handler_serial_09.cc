@@ -13,12 +13,13 @@
 // ------------------------------------------------------------------------
 
 // This test verifies the correctness of retrieving all particles that belong to
-// a specified parent cell using
+// a specified parent cell using:
 //   Particles::ParticleHandler::particles_in_descendant_active_cells() and
 //   Particles::ParticleHandler::particles_in_active_subtrees_of_level_cells().
 //
-// The test setup consists of a square domain that is refined three times. A
-// fixed number of particles are inserted at random positions in the domain.
+// The test setup consists of a square domain refined three times. Particles
+// are placed at fixed positions that are chosen arbitrarily and do not
+// correspond to any special geometric or physical configuration.
 //
 // For each cell on level 1, the test selects one of its descendant active cells
 // on level 3 and queries all particles that belong to the corresponding parent

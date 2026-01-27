@@ -491,7 +491,7 @@ namespace Particles
   std::vector<typename ParticleHandler<dim, spacedim>::particle_iterator_range>
   ParticleHandler<dim, spacedim>::particles_in_descendant_active_cells(
     const typename Triangulation<dim, spacedim>::cell_iterator &cell,
-    const int relative_level) const
+    const unsigned int relative_level) const
   {
     // Currently this function is not implemented for parallel triangulations.
     // This is planned to be added in the future.
@@ -505,11 +505,8 @@ namespace Particles
       ExcMessage(
         "This function is not yet implemented for parallel triangulations. This is work in progress."));
 
-    Assert(relative_level >= 0,
-           ExcMessage("The relative level must be non-negative."));
-
     Assert(
-      cell->level() >= relative_level,
+      cell->level() >= static_cast<int>(relative_level),
       ExcMessage(
         "The cell level must be greater than or equal to the requested relative parent level."));
 
@@ -521,7 +518,7 @@ namespace Particles
 
     // Find the root cell at the requested relative level
     cell_iterator root_cell = cell;
-    for (int i = 0; i < relative_level; ++i)
+    for (unsigned int i = 0; i < relative_level; ++i)
       root_cell = root_cell->parent();
 
     std::vector<particle_iterator_range> result;

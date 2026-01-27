@@ -276,7 +276,7 @@ namespace Particles
     std::vector<particle_iterator_range>
     particles_in_descendant_active_cells(
       const typename Triangulation<dim, spacedim>::cell_iterator &cell,
-      const int relative_level) const;
+      const unsigned int relative_level) const;
 
     /**
      * For each cell on the given refinement level, this function returns a
