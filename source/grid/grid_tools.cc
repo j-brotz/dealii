@@ -1067,9 +1067,9 @@ namespace GridTools
   template <int dim, int spacedim>
   unsigned int
   find_closest_vertex_of_cell(
-    const typename Triangulation<dim, spacedim>::active_cell_iterator &cell,
-    const Point<spacedim>                                             &position,
-    const Mapping<dim, spacedim>                                      &mapping)
+    const typename Triangulation<dim, spacedim>::cell_iterator &cell,
+    const Point<spacedim>                                      &position,
+    const Mapping<dim, spacedim>                               &mapping)
   {
     const auto         vertices         = mapping.get_vertices(cell);
     double             minimum_distance = position.distance_square(vertices[0]);

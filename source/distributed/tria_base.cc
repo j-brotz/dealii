@@ -11,6 +11,7 @@
 // -----------------------------------------------------------------------------
 
 
+#include "deal.II/base/exception_macros.h"
 #include <deal.II/base/logstream.h>
 #include <deal.II/base/memory_consumption.h>
 #include <deal.II/base/mpi.templates.h>
@@ -132,6 +133,15 @@ namespace parallel
     return number_cache.n_locally_owned_active_cells;
   }
 
+  template <int dim, int spacedim>
+  DEAL_II_CXX20_REQUIRES((concepts::is_valid_dim_spacedim<dim, spacedim>))
+  unsigned int TriangulationBase<dim, spacedim>::n_locally_owned_level_cells(
+    const unsigned int level) const
+  {
+    AssertIndexRange(level, this->n_levels());
+    return number_cache.n_locally_owned_level_cells[level];
+  }
+
 
 
   template <int dim, int spacedim>
@@ -169,7 +179,9 @@ namespace parallel
   {
     number_cache.ghost_owners.clear();
     number_cache.level_ghost_owners.clear();
+    number_cache.ghost_owners_on_level.clear();
     number_cache.n_locally_owned_active_cells = 0;
+    number_cache.n_locally_owned_level_cells.clear();
 
     if (this->n_levels() == 0)
       {
@@ -204,6 +216,8 @@ namespace parallel
     else
       number_cache.n_locally_owned_active_cells = 0;
 
+
+
     // Potentially cast to a 64 bit type before accumulating to avoid
     // overflow:
     number_cache.n_global_active_cells =
@@ -230,6 +244,37 @@ namespace parallel
               cell->level_subdomain_id() != this->locally_owned_subdomain())
             this->number_cache.level_ghost_owners.insert(
               cell->level_subdomain_id());
+
+        // find ghost owners on each level
+        number_cache.ghost_owners_on_level.reserve(this->n_levels());
+        for (unsigned int level = 0; level < this->n_levels(); ++level)
+          {
+            std::set<types::subdomain_id> local_ghost_owners_on_level;
+
+            for (const auto &cell : this->cell_iterators_on_level(level))
+              if (cell->level_subdomain_id() !=
+                    numbers::artificial_subdomain_id &&
+                  cell->level_subdomain_id() != this->locally_owned_subdomain())
+                local_ghost_owners_on_level.insert(cell->level_subdomain_id());
+
+            this->number_cache.ghost_owners_on_level.push_back(
+              local_ghost_owners_on_level);
+          }
+
+        // determine locally owned cells on each level
+        number_cache.n_locally_owned_level_cells.reserve(this->n_levels());
+        for (unsigned int level = 0; level < this->n_levels(); ++level)
+          {
+            const unsigned int n_locally_owned_level_cells =
+              std::count_if(this->begin(level),
+                            this->end(level),
+                            [](const auto &i) {
+                              return i.is_locally_owned_on_level();
+                            });
+
+            this->number_cache.n_locally_owned_level_cells.push_back(
+              n_locally_owned_level_cells);
+          }
 
         if constexpr (running_in_debug_mode())
           {
@@ -338,6 +383,17 @@ namespace parallel
   }
 
 
+  template <int dim, int spacedim>
+  DEAL_II_CXX20_REQUIRES((concepts::is_valid_dim_spacedim<dim, spacedim>))
+  const std::set<types::subdomain_id>
+    &TriangulationBase<dim, spacedim>::level_ghost_owners(
+      const unsigned int level) const
+  {
+    AssertIndexRange(level, number_cache.ghost_owners_on_level.size());
+    return number_cache.ghost_owners_on_level[level];
+  }
+
+
 
   template <int dim, int spacedim>
   DEAL_II_CXX20_REQUIRES((concepts::is_valid_dim_spacedim<dim, spacedim>))
@@ -401,7 +457,8 @@ namespace parallel
               complete_index_set(this->n_active_cells()),
               this->mpi_communicator);
 
-          // set global active cell indices and increment process-local counters
+          // set global active cell indices and increment process-local
+          // counters
           for (const auto &cell : this->active_cell_iterators())
             cell->set_global_active_cell_index(
               cell_counter[cell->subdomain_id()]++);
@@ -428,7 +485,8 @@ namespace parallel
       this->mpi_communicator);
     AssertThrowMPI(ierr);
 
-    // 3) give global indices to locally-owned cells and mark all other cells as
+    // 3) give global indices to locally-owned cells and mark all other cells
+    // as
     //    invalid
     std::pair<types::global_cell_index, types::global_cell_index> my_range;
     my_range.first = cell_index;

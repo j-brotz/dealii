@@ -137,6 +137,14 @@ namespace parallel
     n_locally_owned_active_cells() const;
 
     /**
+     * Return the number of locally owned cells with level equal to @p level. Note
+     * that this number can also be equal to zero as there might be processes
+     * which do not own cells on a certain level but only on higher levels.
+     */
+    unsigned int
+    n_locally_owned_level_cells(const unsigned int level) const;
+
+    /**
      * Return the total number of active cells in the triangulation.
      *
      * For the serial ::Triangulation class, this function returns the same
@@ -219,6 +227,13 @@ namespace parallel
      */
     const std::set<types::subdomain_id> &
     level_ghost_owners() const;
+
+    /**
+     * As above but returns the set of level ghost owners for a particular
+     * level.
+     */
+    const std::set<types::subdomain_id> &
+    level_ghost_owners(const unsigned int level) const;
 
     std::weak_ptr<const Utilities::MPI::Partitioner>
     global_active_cell_index_partitioner() const override;
@@ -360,6 +375,12 @@ namespace parallel
       unsigned int n_locally_owned_active_cells;
 
       /**
+       * Number of locally owned cells on a specific level. The level is given
+       * by the index of the vector.
+       */
+      std::vector<unsigned int> n_locally_owned_level_cells;
+
+      /**
        * The total number of active cells (sum of @p
        * n_locally_owned_active_cells).
        */
@@ -388,6 +409,13 @@ namespace parallel
        * on this processor (for all levels).
        */
       std::set<types::subdomain_id> level_ghost_owners;
+
+      /**
+       * A vector of sets containing the MPI ranks of the owners of the level
+       * ghost cells on this processor for each level. The index at which the
+       * set is stored corresponds top the level to which it belongs.
+       */
+      std::vector<std::set<types::subdomain_id>> ghost_owners_on_level;
 
       /**
        * Partitioner for the global active cell indices.

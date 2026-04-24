@@ -69,7 +69,7 @@ for (deal_II_dimension : DIMENSIONS; deal_II_space_dimension : SPACE_DIMENSIONS)
       find_closest_vertex_of_cell<deal_II_dimension, deal_II_space_dimension>(
         const typename Triangulation<
           deal_II_dimension,
-          deal_II_space_dimension>::active_cell_iterator &,
+          deal_II_space_dimension>::cell_iterator &,
         const Point<deal_II_space_dimension> &,
         const Mapping<deal_II_dimension, deal_II_space_dimension> &);
 

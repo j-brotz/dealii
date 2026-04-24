@@ -93,8 +93,8 @@ namespace Particles
        */
       ParticlesInCell(
         const std::vector<typename PropertyPool<dim, spacedim>::Handle>
-          &particles,
-        const typename Triangulation<dim, spacedim>::active_cell_iterator &cell)
+                                                                   &particles,
+        const typename Triangulation<dim, spacedim>::cell_iterator &cell)
         : particles(particles)
         , cell(cell)
       {}
@@ -107,7 +107,7 @@ namespace Particles
       /**
        * The underlying cell.
        */
-      typename Triangulation<dim, spacedim>::active_cell_iterator cell;
+      typename Triangulation<dim, spacedim>::cell_iterator cell;
     };
 
     /**

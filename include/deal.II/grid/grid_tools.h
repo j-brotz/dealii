@@ -1795,9 +1795,9 @@ namespace GridTools
   template <int dim, int spacedim>
   unsigned int
   find_closest_vertex_of_cell(
-    const typename Triangulation<dim, spacedim>::active_cell_iterator &cell,
-    const Point<spacedim>                                             &position,
-    const Mapping<dim, spacedim>                                      &mapping =
+    const typename Triangulation<dim, spacedim>::cell_iterator &cell,
+    const Point<spacedim>                                      &position,
+    const Mapping<dim, spacedim>                               &mapping =
       (ReferenceCells::get_hypercube<dim>()
 #ifndef _MSC_VER
          .template get_default_linear_mapping<spacedim>()

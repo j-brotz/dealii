@@ -15,6 +15,7 @@
 
 #include <deal.II/base/config.h>
 
+#include "deal.II/base/patterns.h"
 #include <deal.II/base/array_view.h>
 #include <deal.II/base/bounding_box.h>
 #include <deal.II/base/enable_observer_pointer.h>
@@ -25,7 +26,10 @@
 
 #include <deal.II/fe/mapping.h>
 
+#include "deal.II/grid/tria_accessor.h"
+#include "deal.II/grid/tria_iterator.h"
 #include <deal.II/grid/grid_tools_cache.h>
+#include <deal.II/grid/grid_tools_topology.h>
 
 #include <deal.II/particles/particle.h>
 #include <deal.II/particles/particle_iterator.h>
@@ -95,6 +99,11 @@ namespace Particles
                     const Mapping<dim, spacedim>       &mapping,
                     const unsigned int                  n_properties = 0);
 
+    ParticleHandler(const Triangulation<dim, spacedim> &tria,
+                    const Mapping<dim, spacedim>       &mapping,
+                    const unsigned int cache_particles_on_level,
+                    const unsigned int n_properties);
+
     /**
      * Destructor.
      */
@@ -109,6 +118,12 @@ namespace Particles
     initialize(const Triangulation<dim, spacedim> &tria,
                const Mapping<dim, spacedim>       &mapping,
                const unsigned int                  n_properties = 0);
+
+    void
+    initialize(const Triangulation<dim, spacedim> &tria,
+               const Mapping<dim, spacedim>       &mapping,
+               const unsigned int                  cache_particles_on_level,
+               const unsigned int                  n_properties);
 
     /**
      * Copy the state of particle handler @p particle_handler into the
@@ -228,8 +243,7 @@ namespace Particles
      */
     types::particle_index
     n_particles_in_cell(
-      const typename Triangulation<dim, spacedim>::active_cell_iterator &cell)
-      const;
+      const typename Triangulation<dim, spacedim>::cell_iterator &cell) const;
 
     /**
      * Return a pair of particle iterators that mark the begin and end of
@@ -241,7 +255,7 @@ namespace Particles
      */
     particle_iterator_range
     particles_in_cell(
-      const typename Triangulation<dim, spacedim>::active_cell_iterator &cell);
+      const typename Triangulation<dim, spacedim>::cell_iterator &cell);
 
     /**
      * Return a pair of particle iterators that mark the begin and end of
@@ -253,8 +267,7 @@ namespace Particles
      */
     particle_iterator_range
     particles_in_cell(
-      const typename Triangulation<dim, spacedim>::active_cell_iterator &cell)
-      const;
+      const typename Triangulation<dim, spacedim>::cell_iterator &cell) const;
 
     /**
      * This function traverses the cell hierarchy starting from a cell obtained
@@ -319,8 +332,8 @@ namespace Particles
      */
     particle_iterator
     insert_particle(
-      const Particle<dim, spacedim> &particle,
-      const typename Triangulation<dim, spacedim>::active_cell_iterator &cell);
+      const Particle<dim, spacedim>                              &particle,
+      const typename Triangulation<dim, spacedim>::cell_iterator &cell);
 
     /**
      * Insert a particle into the collection of particles given all the
@@ -342,7 +355,7 @@ namespace Particles
       const Point<spacedim>      &position,
       const Point<dim>           &reference_position,
       const types::particle_index particle_index,
-      const typename Triangulation<dim, spacedim>::active_cell_iterator &cell,
+      const typename Triangulation<dim, spacedim>::cell_iterator &cell,
       const ArrayView<const double> &properties = {});
 
     /**
@@ -353,9 +366,8 @@ namespace Particles
      */
     void
     insert_particles(
-      const std::multimap<
-        typename Triangulation<dim, spacedim>::active_cell_iterator,
-        Particle<dim, spacedim>> &particles);
+      const std::multimap<typename Triangulation<dim, spacedim>::cell_iterator,
+                          Particle<dim, spacedim>> &particles);
 
     /**
      * Create and insert a number of particles into the collection of particles.
@@ -879,9 +891,8 @@ namespace Particles
        * This signal is used in step-19.
        */
       boost::signals2::signal<void(
-        const typename Particles::ParticleIterator<dim, spacedim> &particle,
-        const typename Triangulation<dim, spacedim>::active_cell_iterator
-          &cell)>
+        const typename Particles::ParticleIterator<dim, spacedim>  &particle,
+        const typename Triangulation<dim, spacedim>::cell_iterator &cell)>
         particle_lost;
     };
 
@@ -900,8 +911,8 @@ namespace Particles
      */
     particle_iterator
     insert_particle(
-      const void                                                       *&data,
-      const typename Triangulation<dim, spacedim>::active_cell_iterator &cell);
+      const void                                                *&data,
+      const typename Triangulation<dim, spacedim>::cell_iterator &cell);
 
     /**
      * Perform the local insertion operation into the particle container. This
@@ -967,6 +978,386 @@ namespace Particles
      * access to the particles of a cell.
      */
     std::vector<typename particle_container::iterator> cells_to_particle_cache;
+
+    // -1 indicating that particles are cached only on active cells
+    int cache_particles_on_level = -1;
+
+    // Helper to find correct cell index
+    unsigned int
+    cell_index(
+      const typename Triangulation<dim, spacedim>::cell_iterator &cell) const
+    {
+      if (cache_particles_on_level == -1)
+        return cell->active_cell_index();
+      else
+        return cell->index();
+    }
+
+    typename Triangulation<dim, spacedim>::cell_iterator
+    find_relevant_parent_cell(
+      const typename Triangulation<dim, spacedim>::cell_iterator &cell)
+    {
+      if (cache_particles_on_level == -1)
+        return cell;
+
+      typename Triangulation<dim, spacedim>::cell_iterator parent_cell = cell;
+      while (parent_cell->level() > cache_particles_on_level)
+        parent_cell = parent_cell->parent();
+      return parent_cell;
+    }
+
+
+    struct ParticleCellIteratorRange
+    {
+      ParticleCellIteratorRange(int                                 cell_level,
+                                const Triangulation<dim, spacedim> &tria)
+      {
+        if (cell_level == -1)
+          {
+            auto active_cell_iterator = tria.active_cell_iterators();
+            begin_iterator = ParticleCellIterator(active_cell_iterator.begin());
+            end_iterator   = ParticleCellIterator(active_cell_iterator.end());
+          }
+        else
+          {
+            auto cell_iterator = tria.cell_iterators_on_level(cell_level);
+            begin_iterator     = ParticleCellIterator(cell_iterator.begin());
+            end_iterator       = ParticleCellIterator(cell_iterator.end());
+          }
+      }
+
+      struct ParticleCellIterator
+      {
+        using iterator_category =
+          typename TriaIterator<CellAccessor<dim, spacedim>>::iterator_category;
+        using value_type =
+          typename TriaIterator<CellAccessor<dim, spacedim>>::value_type;
+        using pointer =
+          typename TriaIterator<CellAccessor<dim, spacedim>>::pointer;
+        using reference =
+          typename TriaIterator<CellAccessor<dim, spacedim>>::reference;
+        using difference_type =
+          typename TriaIterator<CellAccessor<dim, spacedim>>::difference_type;
+
+        ParticleCellIterator() = default;
+
+        ParticleCellIterator(
+          const typename Triangulation<dim, spacedim>::active_cell_iterator
+            &active_cell_iterator)
+          : iterator(active_cell_iterator)
+        {}
+
+        ParticleCellIterator(
+          const typename Triangulation<dim, spacedim>::cell_iterator
+            &cell_iterator)
+          : iterator(cell_iterator)
+        {}
+
+        typename Triangulation<dim, spacedim>::cell_iterator
+        operator*() const
+        {
+          return std::visit(
+            [](auto &it) ->
+            typename Triangulation<dim, spacedim>::cell_iterator {
+              return typename Triangulation<dim, spacedim>::cell_iterator(it);
+            },
+            iterator);
+        }
+
+        const CellAccessor<dim, spacedim> *
+        operator->() const
+        {
+          return std::visit(
+            [](auto &it) -> const CellAccessor<dim, spacedim> * {
+              return it.operator->();
+            },
+            iterator);
+        }
+
+        CellAccessor<dim, spacedim> *
+        operator->()
+        {
+          return std::visit(
+            [](auto &it) -> CellAccessor<dim, spacedim> * {
+              return it.operator->();
+            },
+            iterator);
+        }
+
+        ParticleCellIterator &
+        operator++()
+        {
+          std::visit([](auto &it) { ++it; }, iterator);
+          return *this;
+        }
+
+        ParticleCellIterator
+        operator++(int)
+        {
+          ParticleCellIterator tmp = *this;
+          std::visit([](auto &it) { ++it; }, iterator);
+          return tmp;
+        }
+
+        ParticleCellIterator &
+        operator--()
+        {
+          std::visit([](auto &it) { --it; }, iterator);
+          return *this;
+        }
+
+        ParticleCellIterator
+        operator--(int)
+        {
+          ParticleCellIterator tmp = *this;
+          std::visit([](auto &it) { --it; }, iterator);
+          return tmp;
+        }
+
+        bool
+        operator==(const ParticleCellIterator &other) const
+        {
+          return std::visit(
+            [&](auto &it) -> bool {
+              return std::visit(
+                [&](auto &other_it) -> bool { return it == other_it; },
+                other.iterator);
+            },
+            iterator);
+        }
+
+        bool
+        operator!=(const ParticleCellIterator &other) const
+        {
+          return std::visit(
+            [&](auto &it) -> bool {
+              return std::visit(
+                [&](auto &other_it) -> bool { return it != other_it; },
+                other.iterator);
+            },
+            iterator);
+        }
+
+        bool
+        operator<(const ParticleCellIterator &other) const
+        {
+          return std::visit(
+            [&](auto &it) -> bool {
+              return std::visit(
+                [&](auto &other_it) -> bool { return it < other_it; },
+                other.iterator);
+            },
+            iterator);
+        }
+
+        bool
+        operator>(const ParticleCellIterator &other) const
+        {
+          return std::visit(
+            [&](auto &it) -> bool {
+              return std::visit(
+                [&](auto &other_it) -> bool { return it > other_it; },
+                other.iterator);
+            },
+            iterator);
+        }
+
+        std::variant<
+          typename Triangulation<dim, spacedim>::active_cell_iterator,
+          typename Triangulation<dim, spacedim>::cell_iterator>
+          iterator;
+      };
+
+      ParticleCellIterator
+      begin() const
+      {
+        return begin_iterator;
+      }
+
+      ParticleCellIterator
+      begin()
+      {
+        return begin_iterator;
+      }
+
+      ParticleCellIterator
+      end() const
+      {
+        return end_iterator;
+      }
+
+      ParticleCellIterator
+      end()
+      {
+        return end_iterator;
+      }
+
+    private:
+      ParticleCellIterator begin_iterator;
+      ParticleCellIterator end_iterator;
+    };
+
+    ParticleCellIteratorRange
+    cell_iterator() const
+    {
+      return ParticleCellIteratorRange(cache_particles_on_level,
+                                       *triangulation);
+    }
+
+    bool
+    cell_is_artificial(
+      const typename Triangulation<dim, spacedim>::cell_iterator &cell) const
+    {
+      if (cache_particles_on_level == -1)
+        return cell->is_artificial();
+      else
+        {
+          return cell->is_artificial_on_level();
+        }
+    }
+
+    unsigned int
+    n_relevant_cells() const
+    {
+      if (cache_particles_on_level == -1)
+        return triangulation->n_active_cells();
+      else
+        {
+          return triangulation->n_cells(cache_particles_on_level);
+        }
+    }
+
+    bool
+    cell_is_ghost(
+      const typename Triangulation<dim, spacedim>::cell_iterator &cell) const
+    {
+      if (cache_particles_on_level == -1)
+        return cell->is_ghost();
+      else
+        {
+          return cell->is_ghost_on_level();
+        }
+    }
+
+    bool
+    cell_is_locally_owned(
+      const typename Triangulation<dim, spacedim>::cell_iterator &cell) const
+    {
+      if (cache_particles_on_level == -1)
+        return cell->is_locally_owned();
+      else
+        {
+          return cell->is_locally_owned_on_level();
+        }
+    }
+
+    bool
+    has_locally_owned_cells(
+      const parallel::TriangulationBase<dim, spacedim> *tria) const
+    {
+      if (cache_particles_on_level == -1)
+        return tria->n_locally_owned_active_cells() > 0;
+      else
+        return tria->n_locally_owned_level_cells(cache_particles_on_level);
+    }
+
+    types::subdomain_id
+    cell_subdomain_id(
+      const typename Triangulation<dim, spacedim>::cell_iterator &cell) const
+    {
+      if (cache_particles_on_level == -1 || cell->is_active())
+        return cell->subdomain_id();
+      else
+        {
+          return cell->level_subdomain_id();
+        }
+    }
+
+    const std::set<types::subdomain_id> &
+    parallel_ghost_owners(
+      const parallel::TriangulationBase<dim, spacedim> *tria) const
+    {
+      if (cache_particles_on_level == -1)
+        return tria->ghost_owners();
+      else
+        {
+          return tria->level_ghost_owners(cache_particles_on_level);
+        }
+    }
+
+    std::vector<std::set<typename Triangulation<dim, spacedim>::cell_iterator>>
+    vertex_to_cell_map() const
+    {
+      if (cache_particles_on_level == -1)
+        {
+          std::vector<std::set<
+            typename Triangulation<dim, spacedim>::active_cell_iterator>>
+            active_vertex_to_cell_map =
+              GridTools::vertex_to_cell_map(*triangulation);
+
+          // Convert container from active cell iterators to cell iterators
+          std::vector<
+            std::set<typename Triangulation<dim, spacedim>::cell_iterator>>
+            result;
+
+          result.resize(active_vertex_to_cell_map.size());
+
+          for (unsigned int i = 0; i < active_vertex_to_cell_map.size(); ++i)
+            {
+              for (const auto &active_it : active_vertex_to_cell_map[i])
+                {
+                  result[i].insert(
+                    typename Triangulation<dim, spacedim>::cell_iterator(
+                      active_it));
+                }
+            }
+          return result;
+        }
+
+      std::vector<
+        std::set<typename Triangulation<dim, spacedim>::cell_iterator>>
+        vertex_to_cell_map(triangulation->n_vertices());
+
+      typename Triangulation<dim, spacedim>::cell_iterator
+        cell = triangulation->begin(cache_particles_on_level),
+        endc = triangulation->end(cache_particles_on_level);
+
+      for (; cell != endc; ++cell)
+        for (const unsigned int i : cell->vertex_indices())
+          vertex_to_cell_map[cell->vertex_index(i)].insert(cell);
+
+      // TODO: We do not consider hanging nodes here for now. However, for
+      // potential corner cases, e.g. of some active cells are coarser than the
+      // level we want to store them on we need to take care of hanging nodes as
+      // well.
+
+      return vertex_to_cell_map;
+    }
+
+    unsigned int
+    find_closest_vertex_of_cell(
+      const typename Triangulation<dim, spacedim>::cell_iterator &cell,
+      const Point<spacedim>                                      &position,
+      const Mapping<dim, spacedim>                               &mapping)
+    {
+      const auto   vertices         = mapping.get_vertices(cell);
+      double       minimum_distance = position.distance_square(vertices[0]);
+      unsigned int closest_vertex   = 0;
+      const unsigned int n_vertices = cell->n_vertices();
+
+      for (unsigned int v = 1; v < n_vertices; ++v)
+        {
+          const double vertex_distance = position.distance_square(vertices[v]);
+          if (vertex_distance < minimum_distance)
+            {
+              closest_vertex   = v;
+              minimum_distance = vertex_distance;
+            }
+        }
+      return closest_vertex;
+    }
+
+
 
     /**
      * This variable stores how many particles are stored globally. It is
@@ -1088,12 +1479,10 @@ namespace Particles
         &particles_to_send,
       const std::map<
         types::subdomain_id,
-        std::vector<
-          typename Triangulation<dim, spacedim>::active_cell_iterator>>
+        std::vector<typename Triangulation<dim, spacedim>::cell_iterator>>
         &new_cells_for_particles = std::map<
           types::subdomain_id,
-          std::vector<
-            typename Triangulation<dim, spacedim>::active_cell_iterator>>(),
+          std::vector<typename Triangulation<dim, spacedim>::cell_iterator>>(),
       const bool enable_cache = false);
 
     /**
